@@ -145,6 +145,7 @@ async fn botinfo(ctx: Context<'_>) -> anyhow::Result<()> {
             ),
         );
 
+    drop(data);
     ctx.send(CreateReply::default().embed(embed)).await?;
 
     Ok(())
