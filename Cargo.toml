@@ -1,6 +1,24 @@
+[package]
+name = "usaco-standings-bot"
+version = "0.1.0"
+edition = "2021"
+
 [workspace]
 members = [
-    "bot",
-    "scraper",
+    "usaco-standings-scraper",
 ]
 resolver = "2"
+
+[dependencies]
+anyhow = { version = "1.0.95", features = ["backtrace"] }
+chrono = "0.4.39"
+poise = "0.6.1"
+readable = "0.16.0"
+regex = "1.11.1"
+reqwest = { version = "0.12.11", features = ["gzip", "brotli", "deflate", "zstd", "http2"] }
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.134"
+tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+usaco-standings-scraper = { version = "0.1.0", path = "usaco-standings-scraper", features = ["serde"] }

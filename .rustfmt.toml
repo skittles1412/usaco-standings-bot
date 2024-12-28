@@ -1,0 +1,5 @@
+# we use unstable features
+# cargo +nightly fmt to format code
+imports_granularity = "Crate"
+wrap_comments = true
+format_code_in_doc_comments = true

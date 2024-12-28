@@ -1,0 +1,15 @@
+[package]
+name = "usaco-standings-scraper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.95"
+http = "1.2.0"
+scraper = "0.22.0"
+serde = { version = "1.0.216", features = ["derive"], optional = true }
+tokio = { version = "1.42.0", features = ["macros", "rt"] }
+tracing = "0.1.41"
+url = "2.5.4"
+
+[features]
