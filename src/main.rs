@@ -336,7 +336,7 @@ async fn main() -> anyhow::Result<()> {
                 {
                     let data = data.clone();
                     tokio::spawn(async move {
-                        let mut interval = tokio::time::interval(Duration::from_secs(5));
+                        let mut interval = tokio::time::interval(Duration::from_secs(5 * 60));
 
                         loop {
                             interval.tick().await;
