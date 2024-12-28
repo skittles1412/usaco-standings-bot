@@ -20,16 +20,14 @@ use tokio::sync::{oneshot, Mutex};
 use tracing::{error, info, warn};
 
 struct AppData {
-    db: UsacoDb,
-    stats: AppStats,
+    db: Mutex<UsacoDb>,
+    stats: Mutex<AppStats>,
     /// Start of this bot process, used to calculate uptime
     start: Instant,
     application_info: CurrentApplicationInfo,
 }
 
-/// Bot data passed to all commands.
-type Data = Arc<Mutex<AppData>>;
-
+type Data = Arc<AppData>;
 type Context<'a> = poise::Context<'a, Data, anyhow::Error>;
 
 /// Shows this help menu
@@ -80,7 +78,9 @@ async fn botinfo(ctx: Context<'_>) -> anyhow::Result<()> {
         (bot.name.clone(), bot.face().clone())
     };
 
-    let data = ctx.data().lock().await;
+    let data = ctx.data();
+    let db = data.db.lock().await;
+    let stats = data.stats.lock().await;
 
     let embed = CreateEmbed::new()
         .description(&data.application_info.description)
@@ -92,12 +92,8 @@ async fn botinfo(ctx: Context<'_>) -> anyhow::Result<()> {
             readable::up::UptimeFull::from(data.start.elapsed()).to_string(),
             true,
         )
-        .field("Queries Made", data.stats.query_count.to_string(), true)
-        .field(
-            "Users Queried",
-            data.stats.users_queried.len().to_string(),
-            true,
-        )
+        .field("Queries Made", stats.query_count.to_string(), true)
+        .field("Users Queried", stats.users_queried.len().to_string(), true)
         .field("Server Count", ctx.cache().guild_count().to_string(), true)
         .field(
             "User Count",
@@ -116,13 +112,13 @@ async fn botinfo(ctx: Context<'_>) -> anyhow::Result<()> {
         )
         .fields(
             [
-                ("USACO Records", data.db.people_count()),
-                ("USACO Contest Records", data.db.contest_count()),
-                ("USACO Camp Records", data.db.camp_count()),
-                ("IOI Records", data.db.ioi_people_count()),
-                ("IOI Contest Records", data.db.ioi_records_count()),
-                ("EGOI Records", data.db.egoi_people_count()),
-                ("EGOI Contest Records", data.db.egoi_records_count()),
+                ("USACO Records", db.people_count()),
+                ("USACO Contest Records", db.contest_count()),
+                ("USACO Camp Records", db.camp_count()),
+                ("IOI Records", db.ioi_people_count()),
+                ("IOI Contest Records", db.ioi_records_count()),
+                ("EGOI Records", db.egoi_people_count()),
+                ("EGOI Contest Records", db.egoi_records_count()),
             ]
             .into_iter()
             .map(|(k, v)| (k, v.to_string(), true)),
@@ -145,7 +141,8 @@ async fn botinfo(ctx: Context<'_>) -> anyhow::Result<()> {
             ),
         );
 
-    drop(data);
+    drop(db);
+    drop(stats);
     ctx.send(CreateReply::default().embed(embed)).await?;
 
     Ok(())
@@ -257,7 +254,7 @@ async fn update(ctx: Context<'_>) -> anyhow::Result<()> {
     msg.edit(ctx, progress.lock().await.get_message(ctx, true))
         .await?;
 
-    ctx.data().lock().await.db = data.into();
+    *ctx.data().db.lock().await = data.into();
 
     ctx.say(format!(
         "Successfully finished parsing in {:.2} seconds!",
@@ -324,12 +321,12 @@ async fn main() -> anyhow::Result<()> {
                 ctx.set_activity(Some(ActivityData::custom("s;help for usage!")));
 
                 let data = AppData {
-                    db: store_data.db,
-                    stats: store_data.stats,
+                    db: Mutex::new(store_data.db),
+                    stats: Mutex::new(store_data.stats),
                     start: Instant::now(),
                     application_info: ctx.http.get_current_application_info().await?,
                 };
-                let data = Arc::new(Mutex::new(data));
+                let data = Arc::new(data);
 
                 // save data every 5 minutes. for now, it's ok to lose the last 5 minutes of
                 // data in the case of a shutdown.
@@ -341,12 +338,12 @@ async fn main() -> anyhow::Result<()> {
                         loop {
                             interval.tick().await;
 
-                            let data = data.lock().await;
-
-                            if let Err(e) = filestore.save_db(&data.db).await {
+                            // a bit unfortunate that the guards for `data` are held while waiting
+                            // for the filesystem, but it probably doesn't really matter
+                            if let Err(e) = filestore.save_db(&*data.db.lock().await).await {
                                 warn!("failed to save db to database: {e:?}");
                             }
-                            if let Err(e) = filestore.save_stats(&data.stats).await {
+                            if let Err(e) = filestore.save_stats(&*data.stats.lock().await).await {
                                 warn!("failed to save stats to database: {e:?}");
                             }
                         }
