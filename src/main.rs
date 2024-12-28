@@ -72,14 +72,6 @@ async fn ping(ctx: Context<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Check the servers this bot is in
-#[poise::command(prefix_command, owners_only, dm_only, hide_in_help)]
-async fn servers(ctx: Context<'_>) -> anyhow::Result<()> {
-    poise::builtins::servers(ctx).await?;
-
-    Ok(())
-}
-
 /// Lists bot statistics
 #[poise::command(prefix_command, slash_command)]
 async fn botinfo(ctx: Context<'_>) -> anyhow::Result<()> {
@@ -284,7 +276,7 @@ async fn main() -> anyhow::Result<()> {
     let store_data = filestore.load().await;
 
     let options = poise::FrameworkOptions {
-        commands: vec![help(), invite(), ping(), servers(), botinfo(), update()],
+        commands: vec![help(), invite(), ping(), botinfo(), update()],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some("s;".into()),
             edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(
