@@ -541,13 +541,11 @@ pub trait HttpClient {
 /// `max_year` is the maximum year to parse until. If it's year 2025, for
 /// example, standings up until and including the 2024-25 season will be parsed.
 ///
-/// The provided `svc` should be a [`Service`] which takes in an HTTP URL and
-/// responds with the result of GETting that URL. Here, we use tower services so
-/// it is easy to make use of the tower ecosystem and add other layers such as
-/// rate limiting. Be aware that around 250 requests will get immediately sent
-/// to `svc` to process.
+/// This function will immediately request `client` with around ~250 URLs. Then,
+/// pages will be parsed as each request completes.
 ///
-/// We return an error only when the provided `svc` errors on an HTTP request.
+/// We return an error only when the provided `client` errors on an HTTP
+/// request.
 pub async fn parse_all<E: Send + 'static>(
     max_year: u16,
     mut client: impl HttpClient<Error = E>,
