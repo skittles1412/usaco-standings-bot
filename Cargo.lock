@@ -2833,11 +2833,15 @@ name = "usaco-standings-scraper"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "http 1.2.0",
+ "reqwest 0.12.11",
  "scraper",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "url",
 ]
 

@@ -1,7 +1,11 @@
+//! Scrapes all past USACO results and outputs the result to stdout as json.
+
 use chrono::{Datelike, Utc};
 use reqwest::{Client, StatusCode, Url};
 use std::{future::Future, pin::Pin};
 
+/// A simple implementation of [`usaco_standings_scraper::HttpClient`] by
+/// directly wrapping a [`Client`].
 struct HttpClient {
     client: Client,
 }
