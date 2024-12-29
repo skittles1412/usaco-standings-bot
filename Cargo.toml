@@ -2,6 +2,11 @@
 name = "usaco-standings-bot"
 version = "0.1.0"
 edition = "2021"
+authors = ["skittles1412"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/skittles1412/usaco-standings-bot"
+description = """A Discord bot for looking up past USACO results."""
 
 [workspace]
 members = [
