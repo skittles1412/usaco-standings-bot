@@ -20,15 +20,14 @@ use tokio::sync::{oneshot, Mutex};
 use tracing::{error, info, warn};
 
 struct AppData {
-    db: Mutex<UsacoDb>,
-    stats: Mutex<AppStats>,
+    db: &'static Mutex<UsacoDb>,
+    stats: &'static Mutex<AppStats>,
     /// Start of this bot process, used to calculate uptime
     start: Instant,
     application_info: CurrentApplicationInfo,
 }
 
-type Data = Arc<AppData>;
-type Context<'a> = poise::Context<'a, Data, anyhow::Error>;
+type Context<'a> = poise::Context<'a, AppData, anyhow::Error>;
 
 /// Shows this help menu
 #[poise::command(prefix_command, slash_command)]
@@ -321,34 +320,32 @@ async fn main() -> anyhow::Result<()> {
                 ctx.set_activity(Some(ActivityData::custom("s;help for usage!")));
 
                 let data = AppData {
-                    db: Mutex::new(store_data.db),
-                    stats: Mutex::new(store_data.stats),
+                    db: Box::leak(Box::new(Mutex::new(store_data.db))),
+                    stats: Box::leak(Box::new(Mutex::new(store_data.stats))),
                     start: Instant::now(),
                     application_info: ctx.http.get_current_application_info().await?,
                 };
-                let data = Arc::new(data);
+                let db = data.db;
+                let stats = data.stats;
 
                 // save data every 5 minutes. for now, it's ok to lose the last 5 minutes of
                 // data in the case of a shutdown.
-                {
-                    let data = data.clone();
-                    tokio::spawn(async move {
-                        let mut interval = tokio::time::interval(Duration::from_secs(5 * 60));
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(Duration::from_secs(5 * 60));
 
-                        loop {
-                            interval.tick().await;
+                    loop {
+                        interval.tick().await;
 
-                            // a bit unfortunate that the guards for `data` are held while waiting
-                            // for the filesystem, but it probably doesn't really matter
-                            if let Err(e) = filestore.save_db(&*data.db.lock().await).await {
-                                warn!("failed to save db to database: {e:?}");
-                            }
-                            if let Err(e) = filestore.save_stats(&*data.stats.lock().await).await {
-                                warn!("failed to save stats to database: {e:?}");
-                            }
+                        // a bit unfortunate that the guards for `data` are held while waiting
+                        // for the filesystem, but it probably doesn't really matter
+                        if let Err(e) = filestore.save_db(&*db.lock().await).await {
+                            warn!("failed to save db to database: {e:?}");
                         }
-                    });
-                }
+                        if let Err(e) = filestore.save_stats(&*stats.lock().await).await {
+                            warn!("failed to save stats to database: {e:?}");
+                        }
+                    }
+                });
 
                 Ok(data)
             })
