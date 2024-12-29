@@ -27,6 +27,9 @@ The scrapers are designed to be robust. When faced with unexpected / malformed i
 ## Examples
 
 See `examples/scrape.rs` for an example on how to use the scraper.
+
+## Features
+- `serde`: Enables serde support for (de)serializing the structs in this crate. Enabled by default.
 */
 
 use anyhow::anyhow;
