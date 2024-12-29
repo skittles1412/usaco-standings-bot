@@ -237,16 +237,17 @@ async fn search(
     mut name: String,
 ) -> anyhow::Result<()> {
     {
-        let mut stats = ctx.data().stats.lock().await;
-        stats.users_queried.insert(ctx.author().id);
-
         let new_query = match ctx {
             // avoid double counting caused by edit tracking
             Context::Prefix(pref) => pref.msg.edited_timestamp.is_none(),
             _ => true,
         };
+
         if new_query {
+            let mut stats = ctx.data().stats.lock().await;
+
             stats.query_count += 1;
+            *stats.users_queried.entry(ctx.author().id).or_default() += 1;
         }
     }
 

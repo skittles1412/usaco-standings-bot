@@ -261,9 +261,9 @@ impl From<UsacoData> for UsacoDb {
 /// Various statistics about the bot to be preserved across runs.
 #[derive(Clone, Serialize, Deserialize, Default)]
 pub struct AppStats {
-    /// Set of all users that have used /search at least one.
+    /// Maps users to the number of times they have queried.
     #[serde(default)]
-    pub users_queried: HashSet<UserId>,
+    pub users_queried: HashMap<UserId, usize>,
     /// Amount of /search requests this bot has responded to.
     #[serde(default)]
     pub query_count: u32,
