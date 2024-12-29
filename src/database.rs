@@ -8,16 +8,17 @@ use std::{
 };
 use tracing::error;
 use usaco_standings_scraper::{
-    CampParticipant, ContestParticipant, Graduation, IntlHistory, IntlParticipant, UsacoData,
+    CampParticipant, ContestParticipant, Division, Graduation, IntlHistory, IntlParticipant,
+    MonthYear, UsacoData,
 };
 
 /// A (name, country, graduation year) tuple that is a best effort to identify
 /// people across USACO monthly results.
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct ParticipantId {
     pub name: String,
-    pub country: String,
     pub graduation: Graduation,
+    pub country: String,
 }
 
 impl From<ContestParticipant> for ParticipantId {
@@ -42,19 +43,33 @@ impl From<CampParticipant> for ParticipantId {
     }
 }
 
+/// The record of a contest for a specific participant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParticipantContestRecord {
+    pub contest_time: MonthYear,
+    pub division: Division,
+    pub score: u16,
+}
+
+/// The record of a USACO camp for a specific participant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParticipantCampRecord {
+    pub camp_year: u16,
+}
+
 /// The contests and camp data associated with a specific participant (based on
 /// their id).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Participant {
     pub id: ParticipantId,
-    pub contests: Vec<ContestParticipant>,
-    pub camps: Vec<CampParticipant>,
+    pub contests: Vec<ParticipantContestRecord>,
+    pub camps: Vec<ParticipantCampRecord>,
 }
 
 /// Stores USACO data and answers queries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UsacoDb {
-    participants: Vec<Participant>,
+    pub participants: Vec<Participant>,
     intl_history: IntlHistory,
 }
 
@@ -71,19 +86,25 @@ pub struct NameQueryResult {
 
 impl UsacoDb {
     /// Returns results under a specifc name. Currently, this just does a
-    /// case-insensitive lookup.
+    /// case-insensitive lookup with some normalization to get rid of duplicate
+    /// whitespace.
     ///
-    /// Order of returned results is not guaranteed. We ignore the preferred
-    /// names (the ones in parentheses) listed on the USACO camp / history
-    /// pages.
-    #[expect(unused)]
+    /// Records within each person are returned in chronological order. People
+    /// are returned in order of graduation year and then country.
+    ///
+    /// We ignore the preferred names (the ones in parentheses) listed on the
+    /// USACO camp / history pages.
     pub fn query_name(&self, name: &str) -> NameQueryResult {
-        // case insensitive search
-        let name = name.to_lowercase();
+        // case-insensitive search + ignore duplicate whitespace
+        let name = name
+            .to_lowercase()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
 
         // the database is currently ~20k people and growing very slowly. also this
         // bot's usage is relatively small, so brute force should most definitely be ok.
-        NameQueryResult {
+        let mut res = NameQueryResult {
             participants: self
                 .participants
                 .iter()
@@ -104,7 +125,21 @@ impl UsacoDb {
                 .filter(|p| p.name.to_lowercase() == name)
                 .cloned()
                 .collect(),
+        };
+
+        res.participants
+            .sort_unstable_by(|p1, p2| p1.id.cmp(&p2.id));
+
+        for p in &mut res.participants {
+            p.camps.sort_unstable_by_key(|c| c.camp_year);
+            p.contests
+                .sort_unstable_by_key(|c| (c.contest_time, c.division));
         }
+
+        res.ioi.sort_unstable_by_key(|c| c.year);
+        res.egoi.sort_unstable_by_key(|c| c.year);
+
+        res
     }
 
     /// Number of USACO people we know
@@ -184,7 +219,11 @@ impl From<UsacoData> for UsacoDb {
                         camps: vec![],
                     })
                     .contests
-                    .push(p);
+                    .push(ParticipantContestRecord {
+                        contest_time: contest.time,
+                        division: contest.division,
+                        score: p.score,
+                    });
             }
         }
 
@@ -200,7 +239,9 @@ impl From<UsacoData> for UsacoDb {
                         camps: vec![],
                     })
                     .camps
-                    .push(p);
+                    .push(ParticipantCampRecord {
+                        camp_year: camp.year,
+                    });
             }
         }
 

@@ -2,8 +2,11 @@ mod database;
 
 use anyhow::Context as _;
 use chrono::{Datelike, Utc};
-use database::{AppStats, FileStore, UsacoDb};
-use poise::{serenity_prelude as serenity, CreateReply, FrameworkError};
+use database::{AppStats, FileStore, NameQueryResult, UsacoDb};
+use poise::{
+    builtins::HelpConfiguration, serenity_prelude as serenity, serenity_prelude::CreateAttachment,
+    CreateReply, FrameworkError,
+};
 use reqwest::{Client, StatusCode, Url};
 use serenity::{
     ActivityData, Color, CreateAllowedMentions, CreateEmbed, CreateEmbedAuthor, CreateEmbedFooter,
@@ -18,6 +21,139 @@ use std::{
 };
 use tokio::sync::{oneshot, Mutex};
 use tracing::{error, info, warn};
+use usaco_standings_scraper::{Division, Graduation, IntlMedal, Month};
+
+/// Format a [`NameQueryResult`] as a string to display to users. If
+/// `hide_name`, all names will be hidden.
+///
+/// This function guarantees that the number of lines in the resulting string
+/// will be equal regardless of `hide_name`.
+fn format_name_query_result(
+    result: &NameQueryResult,
+    search_name: &str,
+    hide_name: bool,
+) -> String {
+    fn fmt_month(month: Month) -> &'static str {
+        match month {
+            Month::November => "nov",
+            Month::December => "dec",
+            Month::January => "jan",
+            Month::February => "feb",
+            Month::March => "mar",
+            Month::Open => "open",
+        }
+    }
+
+    fn fmt_division(division: Division) -> &'static str {
+        match division {
+            Division::Bronze => "bronze",
+            Division::Silver => "silver",
+            Division::Gold => "gold",
+            Division::Platinum => "platinum",
+        }
+    }
+
+    let mut out = String::new();
+
+    macro_rules! outln {
+        ($($tt:tt)*) => {{
+            use std::fmt::Write;
+
+            writeln!(out, $($tt)*).expect("writing to a string should not fail");
+        }}
+    }
+
+    outln!(
+        "A total of {} USACO record(s) with name {} found.",
+        result.participants.len(),
+        if hide_name {
+            "[name hidden]"
+        } else {
+            search_name
+        }
+    );
+    outln!();
+
+    for p in &result.participants {
+        outln!(
+            "{name} from {country} {grade}. Results:",
+            name = if hide_name {
+                "[name hidden]"
+            } else {
+                &p.id.name
+            },
+            country = &p.id.country,
+            grade = match p.id.graduation {
+                Graduation::HighSchool { year } => format!("with graduation year {year}"),
+                Graduation::Observer => "as an observer".to_string(),
+            }
+        );
+
+        for c in &p.contests {
+            let season = c.contest_time.year
+                + if matches!(c.contest_time.month, Month::November | Month::December) {
+                    1
+                } else {
+                    0
+                };
+            let grade = match p.id.graduation {
+                Graduation::HighSchool { year } => Some(12 - (year as i32 - season as i32)),
+                Graduation::Observer => None,
+            };
+
+            outln!(
+                "Scored {score} on {month} {year} {division} {grade}",
+                score = c.score,
+                month = fmt_month(c.contest_time.month),
+                year = c.contest_time.year,
+                division = fmt_division(c.division),
+                grade = match grade {
+                    Some(grade) => format!("in grade {grade}"),
+                    None => "as an observer".to_string(),
+                }
+            );
+        }
+
+        for c in &p.camps {
+            let graduation = match p.id.graduation {
+                Graduation::HighSchool { year } => year,
+                Graduation::Observer => {
+                    warn!("camp record from an observer {:?}", p.id);
+                    9999
+                }
+            };
+            let grade = 12 - (graduation as i32 - c.camp_year as i32);
+
+            outln!("Camped in {} in grade {grade}", c.camp_year);
+        }
+        outln!();
+    }
+
+    for (comp, records) in [("IOI", &result.ioi), ("EGOI", &result.egoi)] {
+        if records.is_empty() {
+            continue;
+        }
+
+        outln!("Found {comp} records:");
+
+        for r in records {
+            match r.result {
+                IntlMedal::VisaIssue => outln!(
+                    "qualified for {comp} {} but did not attend due to visa issues",
+                    r.year
+                ),
+                IntlMedal::NoMedal => outln!("competed at {comp} {}", r.year),
+                IntlMedal::Bronze => outln!("bronze medal at {comp} {}", r.year),
+                IntlMedal::Silver => outln!("silver medal at {comp} {}", r.year),
+                IntlMedal::Gold => outln!("gold medal at {comp} {}", r.year),
+            }
+        }
+
+        outln!();
+    }
+
+    out.trim().to_string()
+}
 
 struct AppData {
     db: &'static Mutex<UsacoDb>,
@@ -37,13 +173,21 @@ async fn help(
     #[autocomplete = "poise::builtins::autocomplete_command"]
     command: Option<String>,
 ) -> anyhow::Result<()> {
-    poise::builtins::help(ctx, command.as_deref(), Default::default()).await?;
+    poise::builtins::help(
+        ctx,
+        command.as_deref(),
+        HelpConfiguration {
+            extra_text_at_bottom: "Use /help <command> for more info on a specific command",
+            ..Default::default()
+        },
+    )
+    .await?;
 
     Ok(())
 }
 
 /// Invite the bot to your server!
-#[poise::command(prefix_command, slash_command)]
+#[poise::command(prefix_command, slash_command, ephemeral)]
 async fn invite(ctx: Context<'_>) -> anyhow::Result<()> {
     ctx.say("https://discord.com/api/oauth2/authorize?client_id=758792251496333392&permissions=10304&scope=bot").await?;
 
@@ -55,16 +199,103 @@ async fn invite(ctx: Context<'_>) -> anyhow::Result<()> {
 async fn ping(ctx: Context<'_>) -> anyhow::Result<()> {
     let now = Instant::now();
 
-    let msg = ctx.say(":ping_pong:!").await?;
+    let msg = ctx.say(":ping_pong:").await?;
     msg.edit(
         ctx,
         CreateReply::default().content(format!(
-            ":ping_pong:!\nroundtrip: {}ms\ngateway: {}ms",
+            ":ping_pong:\nroundtrip: {}ms\ngateway: {}ms",
             now.elapsed().as_millis(),
             ctx.ping().await.as_millis()
         )),
     )
     .await?;
+
+    Ok(())
+}
+
+/// Lookup USACO records for a given name
+///
+/// Use slash commands if you want names in result to be hidden, or for the \
+/// result to be only visible to you.
+///
+/// Note that recent bronze and silver promotions may not be reported since \
+/// USACO stopped releasing them.
+///
+/// The bot will update its response if you edit your command, and the bot will
+/// \ delete its response if you delete your message.
+#[poise::command(prefix_command, slash_command, track_edits)]
+async fn search(
+    ctx: Context<'_>,
+    #[flag]
+    #[description = "Hide name in response"]
+    mut hide_name: bool,
+    #[description = "Should result only be shown to you? (slash command only)"] private: Option<
+        bool,
+    >,
+    #[rest]
+    #[description = "Full name to look up (case-insensitive)"]
+    mut name: String,
+) -> anyhow::Result<()> {
+    {
+        let mut stats = ctx.data().stats.lock().await;
+        stats.users_queried.insert(ctx.author().id);
+
+        let new_query = match ctx {
+            // avoid double counting caused by edit tracking
+            Context::Prefix(pref) => pref.msg.edited_timestamp.is_none(),
+            _ => true,
+        };
+        if new_query {
+            stats.query_count += 1;
+        }
+    }
+
+    let private = private.unwrap_or_default();
+
+    // poise won't parse something like `s;search john doe +hide`, but we can just
+    // deal with this manually.
+    if name.contains("+hide") {
+        hide_name = true;
+        name = name.replace("+hide", "");
+    }
+
+    // we should be safe against any response hijacking, since we shouldn't be able
+    // to ping anyone in our embeds, but let's still do this just to be safe.
+    name = name.replace('`', "");
+
+    let res = ctx.data().db.lock().await.query_name(&name);
+    let res = format_name_query_result(&res, &name, hide_name);
+
+    // max length of embed description is 4096
+    if res.len() <= 4000 {
+        let mut embed = CreateEmbed::new()
+            .title("USACO Standings Search Result")
+            .color(Color::BLUE)
+            .description(format!("```{res}```",));
+
+        if name.to_lowercase().starts_with("name") {
+            embed = embed.footer(CreateEmbedFooter::new(
+                "hint: this command was recently refactored. perhaps you wanted to do s;search <name>",
+            ));
+        }
+
+        ctx.send(CreateReply::default().embed(embed).ephemeral(private))
+            .await?;
+    } else {
+        ctx.send(
+            CreateReply::default()
+                .attachment(CreateAttachment::bytes(res, "result.txt"))
+                .ephemeral(private),
+        )
+        .await?;
+    }
+
+    // TODO: implement name hiding with prefix commands properly
+    // if hide_name {
+    //     if let Context::Prefix(pref) = ctx {
+    //         pref.msg.delete(ctx.http()).await.ok();
+    //     }
+    // }
 
     Ok(())
 }
@@ -273,12 +504,14 @@ async fn main() -> anyhow::Result<()> {
     let store_data = filestore.load().await;
 
     let options = poise::FrameworkOptions {
-        commands: vec![help(), invite(), ping(), botinfo(), update()],
+        commands: vec![help(), invite(), ping(), search(), botinfo(), update()],
         prefix_options: poise::PrefixFrameworkOptions {
             prefix: Some("s;".into()),
             edit_tracker: Some(Arc::new(poise::EditTracker::for_timespan(
                 Duration::from_secs(60 * 60),
             ))),
+            mention_as_prefix: true,
+            execute_self_messages: false,
             ..Default::default()
         },
         allowed_mentions: Some(CreateAllowedMentions::new().empty_users().empty_roles()),
@@ -297,9 +530,6 @@ async fn main() -> anyhow::Result<()> {
                 }
             })
         },
-        command_check: Some(|ctx| {
-            Box::pin(async move { Ok(ctx.author().id != ctx.cache().current_user().id) })
-        }),
         ..Default::default()
     };
 
@@ -309,13 +539,6 @@ async fn main() -> anyhow::Result<()> {
                 info!("Logged in as {}", ready.user.name);
 
                 poise::builtins::register_globally(ctx, &framework.options().commands).await?;
-                // dev server
-                poise::builtins::register_in_guild::<(), ()>(
-                    ctx.http.clone(),
-                    &[],
-                    777017381167038474.into(),
-                )
-                .await?;
 
                 ctx.set_activity(Some(ActivityData::custom("s;help for usage!")));
 
