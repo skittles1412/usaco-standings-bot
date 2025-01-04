@@ -276,7 +276,7 @@ async fn search(
 
         if name.to_lowercase().starts_with("name") {
             embed = embed.footer(CreateEmbedFooter::new(
-                "hint: this command was recently refactored. perhaps you wanted to do s;search <name>",
+                r#"hint: this command was recently refactored. perhaps you wanted to do s;search <name>, for example "s;search benjamin qi". alternatively, use /search"#,
             ));
         }
 
