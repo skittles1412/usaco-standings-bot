@@ -221,8 +221,8 @@ async fn ping(ctx: Context<'_>) -> anyhow::Result<()> {
 /// Note that recent bronze and silver promotions may not be reported since \
 /// USACO stopped releasing them.
 ///
-/// The bot will update its response if you edit your command, and the bot will
-/// \ delete its response if you delete your message.
+/// The bot will update its response if you edit your command, and the bot \
+/// will delete its response if you delete your message.
 #[poise::command(prefix_command, slash_command, track_edits)]
 async fn search(
     ctx: Context<'_>,
